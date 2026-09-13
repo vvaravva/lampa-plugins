@@ -30,7 +30,7 @@
     // =====================================================================
 
     var ID  = 'omi';
-    var VER = '1.0.0';
+    var VER = '1.1.0';
     var LOG = '[online-mediainfo]';
 
     if (window.plugin_omi_ready) return;
@@ -53,9 +53,23 @@
         '.online'
     ];
 
-    // Templates actually intercepted — surfaced in the settings screen so
-    // the name can be identified straight from the TV.
-    var seen = {};
+    // Diagnostics, surfaced in the settings screen so the whole picture is
+    // readable straight from the TV, with no DevTools.
+    //
+    //   total        — every Template.get call, proves the hook is alive
+    //   seen         — template names that matched NAME_RE
+    //   decorated    — cards that actually received a tag row
+    //   no_container — matched, but none of CONTAINERS was found
+    //   sample       — markup of the first such card, so the right
+    //                  selector can be identified
+    var stats = {
+        total: 0,
+        seen: {},
+        decorated: 0,
+        no_container: 0,
+        no_tags: 0,
+        sample: ''
+    };
 
     // Fields never parsed: links, images, internals.
     var SKIP_KEYS = [
@@ -284,6 +298,8 @@
         if (!$card || !$card.find) return;
         if ($card.find('.omi-tags').length) return;       // already decorated
 
+        var debug = Lampa.Storage.field(ID + '_debug');
+
         var body = null;
 
         for (var c = 0; c < CONTAINERS.length; c++) {
@@ -292,7 +308,30 @@
             if (found.length) { body = found.eq(0); break; }
         }
 
-        if (!body) return;
+        if (!body) {
+            stats.no_container++;
+
+            // Remember what this card is actually built from, so the right
+            // selector can be worked out without DevTools.
+            if (!stats.sample) {
+                var classes = [];
+
+                $card.find('*').slice(0, 14).each(function () {
+                    var cls = this.className;
+
+                    if (typeof cls === 'string' && cls) classes.push(cls);
+                });
+
+                stats.sample = ($card.prop('class') || '(no class)')
+                    + ' >> ' + classes.join(' | ');
+            }
+
+            // In diagnostic mode never stay silent: fall back to the card
+            // root so something is always visible on screen.
+            if (!debug) return;
+
+            body = $card;
+        }
 
         var text = harvest(data, 0, []).join('  |  ');
         var tags = parse(text);
@@ -307,7 +346,8 @@
 
         if (Lampa.Storage.field(ID + '_compact')) tags = tags.slice(0, 4);
 
-        var debug = Lampa.Storage.field(ID + '_debug');
+        if (!tags.length) stats.no_tags++;
+        else stats.decorated++;
 
         if (!tags.length && !debug) return;
 
@@ -351,10 +391,12 @@
         var wrapped = function (name, vars, like_static) {
             var result = original.apply(this, arguments);
 
+            stats.total++;
+
             if (!like_static && typeof name === 'string' && NAME_RE.test(name)
                 && Lampa.Storage.field(ID + '_enabled')) {
 
-                seen[name] = (seen[name] || 0) + 1;
+                stats.seen[name] = (stats.seen[name] || 0) + 1;
 
                 try {
                     decorate(result, vars);
@@ -413,23 +455,37 @@
                 description: 'Показати, які поля прислав балансер. '
                     + 'Вмикай, якщо теги не з\'являються'
             },
-            // Surface which templates were actually intercepted. Visible
-            // right on the TV and answers immediately whether the hook
-            // fired at all: an empty list means the online plugin builds
-            // its cards some other way.
+            // Full diagnostic report, readable on the TV. Every failure
+            // mode is distinguishable here: hook dead, name not matched,
+            // container not found, or simply nothing to parse.
             onRender: function (item) {
                 var names = [];
 
-                for (var n in seen) {
-                    if (Object.prototype.hasOwnProperty.call(seen, n)) {
-                        names.push(n + ' ×' + seen[n]);
+                for (var n in stats.seen) {
+                    if (Object.prototype.hasOwnProperty.call(stats.seen, n)) {
+                        names.push(n + ' ×' + stats.seen[n]);
                     }
                 }
 
-                item.find('.settings-param__descr').text(names.length
-                    ? 'Перехоплені шаблони: ' + names.join(', ')
-                    : 'Шаблонів онлайн-плагіна ще не бачив. Спершу зайди '
-                      + 'в «Онлайн», потім повернись сюди');
+                var report = ['v' + VER, 'викликів Template.get: ' + stats.total];
+
+                if (!stats.total) {
+                    report.push('ХУК НЕ ПРАЦЮЄ');
+                }
+                else if (!names.length) {
+                    report.push('шаблонів онлайн-плагіна не бачив — '
+                        + 'зайди в «Онлайн», потім повернись сюди');
+                }
+                else {
+                    report.push('шаблони: ' + names.join(', '));
+                    report.push('з тегами: ' + stats.decorated
+                        + ', без тегів: ' + stats.no_tags
+                        + ', без контейнера: ' + stats.no_container);
+
+                    if (stats.sample) report.push('верстка: ' + stats.sample);
+                }
+
+                item.find('.settings-param__descr').text(report.join(' · '));
             }
         });
     }
