@@ -2,13 +2,12 @@
     'use strict';
 
     // =====================================================================
-    //  Мінімальний плагін-твік
-    //  Типовий випадок: підписатись на подію і трохи змінити інтерфейс.
-    //  Саме з такого варто починати — тут немає ні свого екрана,
-    //  ні Controller, ні мережі.
+    //  Minimal tweak plugin
+    //  The typical case: subscribe to one event and adjust the UI a little.
+    //  This is where to start — no own screen, no Controller, no network.
     //
-    //  Що робить: на сторінці картки фарбує статус серіалу
-    //  ("Триває", "Завершено") у різні кольори.
+    //  What it does: colours the TV series status ("Returning", "Ended")
+    //  on the movie card.
     // =====================================================================
 
     var LOG = '[tweak]';
@@ -41,7 +40,7 @@
         Lampa.Listener.follow('full', function (e) {
             if (e.type !== 'complite') return;
 
-            // DOM картки будується не миттєво — даємо кадр на відмальовку
+            // The card DOM is not built instantly — give it a frame to render
             setTimeout(function () {
                 var render = e.object.activity.render();
 

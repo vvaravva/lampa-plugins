@@ -2,29 +2,29 @@
     'use strict';
 
     // =====================================================================
-    //  Скелет плагіна Lampa
-    //  Демонструє всі основні точки розширення:
-    //    1. локалізація         5. власний екран (Activity-компонент)
-    //    2. стилі               6. пункт бокового меню
-    //    3. маніфест            7. кнопка на картці фільму
-    //    4. налаштування        8. ініціалізація
+    //  Lampa plugin skeleton
+    //  Demonstrates every major extension point:
+    //    1. localisation        5. own screen (Activity component)
+    //    2. styles              6. side-menu entry
+    //    3. manifest            7. button on the movie card
+    //    4. settings            8. init
     //
-    //  Перед правкою прочитай ../docs/ru/01-getting-started.md
+    //  Read ../docs/ru/01-getting-started.md before editing.
     // =====================================================================
 
-    var ID  = 'myplug';                 // унікальний префікс для всього
+    var ID  = 'myplug';                 // unique prefix for everything
     var VER = '1.0.0';
     var LOG = '[' + ID + ']';
 
-    // ── ЗАХИСТ 1: подвійне завантаження ─────────────────────────────────
-    // Lampa може виконати скрипт двічі (перевстановлення, дубль URL).
-    // Без цього будуть дублі пунктів меню й обробників.
+    // ── GUARD 1: double load ────────────────────────────────────────────
+    // Lampa may execute the script twice (reinstall, duplicate URL).
+    // Without this you end up with duplicated menu entries and handlers.
     if (window.plugin_myplug_ready) return;
     window.plugin_myplug_ready = true;
 
 
     // =====================================================================
-    //  1. ЛОКАЛІЗАЦІЯ
+    //  1. LOCALISATION
     // =====================================================================
     function registerLang() {
         Lampa.Lang.add({
@@ -64,8 +64,8 @@
 
 
     // =====================================================================
-    //  2. СТИЛІ
-    //  CSS вбудовується рядком і додається в body. Тільки всередині init().
+    //  2. STYLES
+    //  CSS is embedded as a string and appended to body. Inside init() only.
     // =====================================================================
     function registerStyles() {
         Lampa.Template.add(ID + '_style', '<style>'
@@ -80,8 +80,8 @@
 
 
     // =====================================================================
-    //  3. МАНІФЕСТ
-    //  Реєструє плагін у застосунку.
+    //  3. MANIFEST
+    //  Registers the plugin with the app.
     // =====================================================================
     function registerManifest() {
         Lampa.Manifest.plugins = {
@@ -95,8 +95,8 @@
 
 
     // =====================================================================
-    //  4. НАЛАШТУВАННЯ
-    //  Розділ у Налаштуваннях. Читання значень — Lampa.Storage.field(key).
+    //  4. SETTINGS
+    //  A settings section. Read values back with Lampa.Storage.field(key).
     // =====================================================================
     function registerSettings() {
         Lampa.SettingsApi.addComponent({
@@ -108,7 +108,7 @@
                 + 'stroke-linecap="round" stroke-linejoin="round"/></svg>'
         });
 
-        // trigger — перемикач
+        // trigger — a toggle
         Lampa.SettingsApi.addParam({
             component: ID,
             param: { name: ID + '_enabled', type: 'trigger', default: true },
@@ -121,7 +121,7 @@
             }
         });
 
-        // select — список варіантів
+        // select — a list of options
         Lampa.SettingsApi.addParam({
             component: ID,
             param: {
@@ -133,7 +133,7 @@
             field: { name: Lampa.Lang.translate('myplug_settings_mode') }
         });
 
-        // input — текстове поле
+        // input — a text field
         Lampa.SettingsApi.addParam({
             component: ID,
             param: { name: ID + '_server', type: 'input', default: '' },
@@ -150,9 +150,9 @@
 
 
     // =====================================================================
-    //  5. ВЛАСНИЙ ЕКРАН (Activity-компонент)
-    //  Контракт: create / start / pause / stop / destroy / render.
-    //  create() має СИНХРОННО повернути DOM-елемент.
+    //  5. OWN SCREEN (Activity component)
+    //  Contract: create / start / pause / stop / destroy / render.
+    //  create() must return a DOM element SYNCHRONOUSLY.
     // =====================================================================
     function Screen(object) {
         var network = new Lampa.Reguest();
@@ -160,7 +160,7 @@
         var grid    = $('<div class="myplug-grid"></div>');
         var items   = [];
         var last    = false;
-        var inited  = false;   // захист від відповіді, що прийшла після destroy
+        var inited  = false;   // guards against a response arriving after destroy
 
         this.create = function () {
             this.activity.loader(true);
@@ -170,7 +170,7 @@
                 + Lampa.Lang.translate('myplug_title') + '</div>'));
             scroll.append(grid);
 
-            // Приклад реального запиту. Заміни на свій ендпоінт.
+            // Example of a real request. Swap in your own endpoint.
             var url = Lampa.TMDB.api('movie/popular'
                 + '?api_key=' + Lampa.TMDB.key()
                 + '&language=' + Lampa.Storage.field('language')
@@ -182,7 +182,7 @@
         };
 
         this.build = function (data) {
-            if (!inited) return;                      // компонент уже знищено
+            if (!inited) return;                      // component already destroyed
             if (!data || !data.results || !data.results.length) return this.empty();
 
             this.activity.loader(false);
@@ -226,8 +226,8 @@
             this.activity.toggle();
         };
 
-        // start() викликається щоразу, коли екран отримує фокус —
-        // і при створенні, і при поверненні з екрана, відкритого поверх.
+        // start() runs every time the screen gains focus — both on creation
+        // and when returning from a screen opened on top of it.
         this.start = function () {
             if (Lampa.Activity.active().activity !== this.activity) return;
 
@@ -255,9 +255,9 @@
         };
 
         this.pause = function () {};
-        this.stop  = function () {};   // поверх відкрили інший екран — НЕ чистимо
+        this.stop  = function () {};   // another screen opened on top — do NOT clean up
 
-        // destroy() — критично. Тут звільняємо все.
+        // destroy() is critical. Release everything here.
         this.destroy = function () {
             inited = false;
             network.clear();
@@ -274,7 +274,7 @@
 
 
     // =====================================================================
-    //  6. ПУНКТ БОКОВОГО МЕНЮ
+    //  6. SIDE-MENU ENTRY
     // =====================================================================
     function addMenuItem() {
         var item = $('<li class="menu__item selector">'
@@ -301,8 +301,8 @@
 
 
     // =====================================================================
-    //  7. КНОПКА НА КАРТЦІ ФІЛЬМУ
-    //  Вставляється по події full:complite.
+    //  7. BUTTON ON THE MOVIE CARD
+    //  Injected on the full:complite event.
     // =====================================================================
     function addCardButton() {
         Lampa.Listener.follow('full', function (e) {
@@ -311,7 +311,7 @@
 
             var render = e.object.activity.render();
 
-            // не дублюємо, якщо подія прийшла двічі
+            // avoid duplicates if the event fires twice
             if (render.find('.view--myplug').length) return;
 
             var btn = $('<div class="full-start__button selector view--myplug">'
@@ -327,8 +327,8 @@
                 console.log(LOG, 'card:', e.data.movie);
             });
 
-            // .view--torrent може бути відсутнім (торенти вимкнено) —
-            // тому є запасний контейнер.
+            // .view--torrent may be absent (torrents disabled), hence the
+            // fallback container.
             var anchor = render.find('.view--torrent');
 
             if (anchor.length) anchor.after(btn);
@@ -339,7 +339,7 @@
 
 
     // =====================================================================
-    //  8. ІНІЦІАЛІЗАЦІЯ
+    //  8. INIT
     // =====================================================================
     function init() {
         console.log(LOG, 'init, Lampa', Lampa.Manifest.app_version);
@@ -358,9 +358,9 @@
         console.log(LOG, 'ready');
     }
 
-    // ── ЗАХИСТ 2: appready ──────────────────────────────────────────────
-    // window.Lampa існує одразу, але Menu / Activity / Settings / Player
-    // ще НЕ ініціалізовані. Нічого не робимо на верхньому рівні.
+    // ── GUARD 2: appready ───────────────────────────────────────────────
+    // window.Lampa exists immediately, but Menu / Activity / Settings /
+    // Player are NOT initialised yet. Do nothing at the top level.
     if (window.appready) init();
     else Lampa.Listener.follow('app', function (e) {
         if (e.type === 'ready') init();

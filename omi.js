@@ -2,29 +2,31 @@
     'use strict';
 
     // =====================================================================
-    //  Online MediaInfo — розширені теги на картках розділу «Онлайн»
+    //  Online MediaInfo — extra tags on cards in the "Онлайн" section
     //
-    //  Додає до картки теги, яких немає в стандартному рядку балансера:
-    //  тип ріпу (BDRemux / WEB-DL / BDRip…), Dolby Vision, HDR10+,
-    //  кодек (x265 / AV1), глибина (10bit), аудіо (Atmos / DTS-HD MA),
-    //  канали (7.1 / 5.1) та мітки релізу (IMAX, Extended, Proper…).
+    //  Adds the tags the balancer's own info line does not carry:
+    //  source type (BDRemux / WEB-DL / BDRip…), Dolby Vision, HDR10+,
+    //  video codec (x265 / AV1), bit depth (10bit), audio (Atmos /
+    //  DTS-HD MA), channels (7.1 / 5.1) and release marks (IMAX,
+    //  Extended, Proper…).
     //
-    //  ЯК ПРАЦЮЄ
-    //  Онлайн-плагін Lampac малює картку через
+    //  HOW IT WORKS
+    //  The Lampac online plugin builds each card through
     //      Lampa.Template.get('lampac_prestige_full', element)
-    //  де element — сирий об'єкт від балансера. Плагін обгортає
-    //  Template.get, тому отримує і готову картку, і всі поля element.
-    //  Своїх подій Lampac не шле, а MutationObserver ламався б від
-    //  будь-якої зміни верстки — цей хук стабільніший.
+    //  where element is the raw object returned by the balancer. This
+    //  plugin wraps Template.get, so it receives both the finished card
+    //  and every field of element. Lampac emits no events of its own,
+    //  and a MutationObserver would break on any markup change — the
+    //  Template.get hook only depends on the template name.
     //
-    //  ДЖЕРЕЛО ДАНИХ
-    //  Назва релізу може лежати в різних полях залежно від балансера
-    //  (title, text, details, name…), тому плагін склеює ВСІ рядкові
-    //  поля element і шукає токени по них. Хибне спрацювання майже
-    //  виключене — матчаться тільки відомі технічні позначки.
+    //  WHERE THE DATA COMES FROM
+    //  The release name may live in different fields depending on the
+    //  balancer (title, text, details, name…), so the plugin joins ALL
+    //  string fields of element and matches tokens against that. False
+    //  positives are very unlikely: only known technical markers match.
     //
-    //  ЯКЩО ТЕГІВ НЕМАЄ — увімкни «Режим діагностики» в налаштуваннях:
-    //  на картці з'явиться список полів, які реально прислав балансер.
+    //  IF NO TAGS SHOW UP, turn on "Режим діагностики" in the settings:
+    //  the card will then list the fields the balancer actually sent.
     // =====================================================================
 
     var ID  = 'omi';
@@ -34,28 +36,28 @@
     if (window.plugin_omi_ready) return;
     window.plugin_omi_ready = true;
 
-    // Які шаблони декоруємо.
+    // Which templates to decorate.
     //
-    // Спершу було жорстке перелічення імен — і це виявилось помилкою:
-    // онлайн-плагінів багато (online.js, online_mod.js, prestige-форки),
-    // і кожен називає шаблон по-своєму. Тому ім'я перевіряється патерном.
-    // Це дешевий тест по рядку, а не пошук по DOM, тому Template.get
-    // не сповільнюється.
+    // A hardcoded list of names was the original approach, and it was a
+    // mistake: there are many online plugins (online.js, online_mod.js,
+    // prestige forks) and each names its template differently. So the
+    // name is matched by pattern instead. This is a cheap string test
+    // rather than a DOM lookup, so Template.get stays fast.
     var NAME_RE = /online|lampac|prestige/i;
 
-    // Куди вставляти рядок тегів — перший контейнер, який знайдеться.
+    // Where to insert the tag row — the first container that is found.
     var CONTAINERS = [
         '.online-prestige__body',   // Lampac prestige
-        '.online__body',            // старий бандловий online
+        '.online__body',            // old bundled online plugin
         '.online-prestige',
         '.online'
     ];
 
-    // Які шаблони плагін реально бачив — показуємо в налаштуваннях,
-    // щоб можна було з'ясувати ім'я просто з телевізора.
+    // Templates actually intercepted — surfaced in the settings screen so
+    // the name can be identified straight from the TV.
     var seen = {};
 
-    // Поля, які не парсимо: посилання, картинки, службове.
+    // Fields never parsed: links, images, internals.
     var SKIP_KEYS = [
         'url', 'link', 'stream', 'file', 'href', 'img', 'image', 'poster',
         'poster_path', 'backdrop_path', 'profile_path', 'hash', 'method',
@@ -66,14 +68,14 @@
 
 
     // =====================================================================
-    //  ПРАВИЛА РОЗБОРУ
-    //  [група, підпис, регулярка]
-    //  Усередині однієї групи спрацьовує ПЕРШЕ правило — тому
-    //  довші/специфічніші йдуть раніше (HDR10+ перед HDR10 перед HDR,
-    //  DTS-HD MA перед DTS-HD перед DTS, WEB-DLRip перед WEB-DL).
+    //  PARSING RULES
+    //  [group, label, regex]
+    //  Within one group the FIRST match wins, so longer / more specific
+    //  patterns come first (HDR10+ before HDR10 before HDR, DTS-HD MA
+    //  before DTS-HD before DTS, WEB-DLRip before WEB-DL).
     // =====================================================================
     var RULES = [
-        // ── джерело / тип ріпу ──────────────────────────────────────────
+        // ── source / rip type ───────────────────────────────────────────
         ['rip', 'REMUX',      /\b(?:bd|uhd|hd)?[-\s]?remux\b/i],
         ['rip', 'WEB-DLRip',  /\bweb[-\s]?dl[-\s]?rip\b/i],
         ['rip', 'WEB-DL',     /\bweb[-\s]?dl\b/i],
@@ -90,9 +92,9 @@
         ['rip', 'CAMRip',     /\bcam[-\s]?rip\b|\bcamrip\b/i],
         ['rip', 'TS',         /\btelesync\b/i],
 
-        // ── Dolby Vision (окрема група — бо йде разом з HDR10) ──────────
-        // \bDV\b свідомо без прапорця i: у нижньому регістрі "dv"
-        // надто часто трапляється в назвах реліз-груп.
+        // ── Dolby Vision (own group — it ships alongside HDR10) ─────────
+        // \bDV\b deliberately without the i flag: lowercase "dv" shows up
+        // far too often inside release-group names.
         ['dv',  'Dolby Vision', /\b(?:dolby[-\s]?vision|dovi)\b/i],
         ['dv',  'Dolby Vision', /\bDV\b/],
 
@@ -103,20 +105,20 @@
         ['hdr', 'HDR',        /\bhdr\b/i],
         ['hdr', 'SDR',        /\bsdr\b/i],
 
-        // ── відеокодек ──────────────────────────────────────────────────
+        // ── video codec ─────────────────────────────────────────────────
         ['codec', 'AV1',      /\bav1\b/i],
         ['codec', 'x265',     /\b(?:x[-\s]?265|h\.?[-\s]?265|hevc)\b/i],
         ['codec', 'x264',     /\b(?:x[-\s]?264|h\.?[-\s]?264|avc)\b/i],
         ['codec', 'XviD',     /\b(?:xvid|divx)\b/i],
 
-        // ── глибина кольору ─────────────────────────────────────────────
+        // ── colour depth ────────────────────────────────────────────────
         ['depth', '12bit',    /\b12[-\s]?bits?\b/i],
         ['depth', '10bit',    /\b10[-\s]?bits?\b/i],
 
-        // ── Atmos окремо: йде поверх TrueHD / DD+ ───────────────────────
+        // ── Atmos on its own: it sits on top of TrueHD / DD+ ────────────
         ['atmos', 'Atmos',    /\batmos\b/i],
 
-        // ── аудіокодек ──────────────────────────────────────────────────
+        // ── audio codec ─────────────────────────────────────────────────
         ['audio', 'DTS-X',    /\bdts[-\s]?x\b/i],
         ['audio', 'DTS-HD MA', /\bdts[-\s]?hd[-\s]?ma\b/i],
         ['audio', 'DTS-HD',   /\bdts[-\s]?hd\b/i],
@@ -128,12 +130,12 @@
         ['audio', 'AAC',      /\baac\b/i],
         ['audio', 'Opus',     /\bopus\b/i],
 
-        // ── канали ──────────────────────────────────────────────────────
+        // ── channels ────────────────────────────────────────────────────
         ['ch', '7.1',         /\b7\.1\b/],
         ['ch', '5.1',         /\b5\.1\b/],
         ['ch', '2.0',         /\b2\.0\b/],
 
-        // ── мітки релізу (кожна своя група — показуємо всі) ─────────────
+        // ── release marks (each in its own group, so all are shown) ─────
         ['x_imax',     'IMAX',       /\bimax\b/i],
         ['x_matte',    'Open Matte', /\bopen[-\s]?matte\b/i],
         ['x_ext',      'Extended',   /\bextended\b/i],
@@ -144,7 +146,7 @@
         ['x_3d',       '3D',         /\b3d\b/i],
         ['x_hfr',      'HFR',        /\b(?:60\s?fps|hfr)\b/i],
 
-        // ── роздільна здатність (запасний варіант) ──────────────────────
+        // ── resolution (fallback only) ──────────────────────────────────
         ['res', '2160p',      /\b(?:2160[pi]|4k|uhd)\b/i],
         ['res', '1440p',      /\b1440[pi]\b/i],
         ['res', '1080p',      /\b1080[pi]\b/i],
@@ -152,11 +154,11 @@
         ['res', '480p',       /\b480[pi]\b/i]
     ];
 
-    // Синоніми для зняття дублів.
-    // Балансер пише «H.265», ми — «x265»; бейдж «4K», ми — «2160p».
-    // Без цього на картці був би дубль однієї й тієї ж інформації.
-    // Обережно з короткими синонімами: «hd» збігся б із «HDR»,
-    // «sd» — із «SDR», тому їх тут немає.
+    // Synonyms used to drop duplicates.
+    // The balancer writes "H.265" where we write "x265", and shows a "4K"
+    // badge where we write "2160p". Without this the card would carry the
+    // same fact twice. Careful with short synonyms: "hd" would match
+    // inside "HDR" and "sd" inside "SDR", so neither is listed here.
     var ALIASES = {
         'x265':         ['x265', 'h.265', 'h265', 'hevc'],
         'x264':         ['x264', 'h.264', 'h264', 'avc'],
@@ -178,7 +180,7 @@
         return false;
     }
 
-    // Порядок груп на картці.
+    // Order of groups on the card.
     var ORDER = ['rip', 'res', 'codec', 'depth', 'dv', 'hdr',
                  'atmos', 'audio', 'ch',
                  'x_imax', 'x_matte', 'x_ext', 'x_dc', 'x_unrated',
@@ -186,7 +188,7 @@
 
 
     // =====================================================================
-    //  ЗБІР ТЕКСТУ З ОБ'ЄКТА
+    //  COLLECT TEXT FROM THE OBJECT
     // =====================================================================
     function harvest(obj, depth, acc) {
         if (obj == null || depth > 3 || acc.join(' ').length > MAX_TEXT) return acc;
@@ -222,7 +224,7 @@
 
 
     // =====================================================================
-    //  РОЗБІР
+    //  PARSE
     // =====================================================================
     function parse(text) {
         var found = {};
@@ -232,7 +234,7 @@
             var label = RULES[i][1];
             var re    = RULES[i][2];
 
-            if (found[group]) continue;            // в групі вже є збіг
+            if (found[group]) continue;            // group already matched
             if (re.test(text)) found[group] = label;
         }
 
@@ -247,7 +249,7 @@
 
 
     // =====================================================================
-    //  СТИЛІ
+    //  STYLES
     // =====================================================================
     function registerStyles() {
         Lampa.Template.add(ID + '_style', '<style>'
@@ -276,11 +278,11 @@
 
 
     // =====================================================================
-    //  ДЕКОРУВАННЯ КАРТКИ
+    //  DECORATE A CARD
     // =====================================================================
     function decorate($card, data) {
         if (!$card || !$card.find) return;
-        if ($card.find('.omi-tags').length) return;       // вже декоровано
+        if ($card.find('.omi-tags').length) return;       // already decorated
 
         var body = null;
 
@@ -295,8 +297,8 @@
         var text = harvest(data, 0, []).join('  |  ');
         var tags = parse(text);
 
-        // Не дублюємо те, що балансер уже написав у рядку info
-        // (наприклад «2160p / 18.57 GB / HDR / H.265 / Dolby Vision / ↑18»).
+        // Do not repeat what the balancer already wrote in its info line,
+        // e.g. "2160p / 18.57 GB / HDR / H.265 / Dolby Vision / ↑18".
         var shown = ($card.text() || '').toLowerCase();
 
         tags = tags.filter(function (t) {
@@ -316,8 +318,8 @@
                 + t.label + '</div>');
         });
 
-        // Режим діагностики: показуємо, які поля реально прислав балансер.
-        // Видно прямо на телевізорі — не треба DevTools.
+        // Diagnostic mode: show which fields the balancer actually sent.
+        // Visible right on the TV, so no DevTools are needed.
         if (debug) {
             var keys = [];
 
@@ -336,10 +338,10 @@
 
 
     // =====================================================================
-    //  ХУК Template.get
-    //  Сигнатура оригіналу: get(name, vars = {}, like_static = false)
-    //  При like_static повертається рядок, не jQuery — такі виклики
-    //  пропускаємо.
+    //  Template.get HOOK
+    //  Original signature: get(name, vars = {}, like_static = false)
+    //  With like_static it returns a string rather than jQuery, so those
+    //  calls are skipped.
     // =====================================================================
     function hookTemplate() {
         if (Lampa.Template.get.__omi_hooked) return;
@@ -372,7 +374,7 @@
 
 
     // =====================================================================
-    //  НАЛАШТУВАННЯ
+    //  SETTINGS
     // =====================================================================
     function registerSettings() {
         Lampa.SettingsApi.addComponent({
@@ -411,9 +413,10 @@
                 description: 'Показати, які поля прислав балансер. '
                     + 'Вмикай, якщо теги не з\'являються'
             },
-            // Показуємо, які шаблони плагін реально перехопив. Це видно
-            // прямо на телевізорі й одразу каже, чи хук взагалі спрацював:
-            // порожній список — онлайн-плагін малює картки якось інакше.
+            // Surface which templates were actually intercepted. Visible
+            // right on the TV and answers immediately whether the hook
+            // fired at all: an empty list means the online plugin builds
+            // its cards some other way.
             onRender: function (item) {
                 var names = [];
 
@@ -433,7 +436,7 @@
 
 
     // =====================================================================
-    //  ІНІЦІАЛІЗАЦІЯ
+    //  INIT
     // =====================================================================
     function init() {
         console.log(LOG, 'init v' + VER + ', Lampa', Lampa.Manifest.app_version);
