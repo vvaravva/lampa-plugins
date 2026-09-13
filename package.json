@@ -1,0 +1,10 @@
+{
+  "name": "lampa-plugins",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Мої плагіни для Lampa",
+  "scripts": {
+    "dev": "npx --yes serve src -l 8080 --cors",
+    "check": "node --check src/online-mediainfo.js && node --check src/my-plugin.js && node --check src/tweak-example.js"
+  }
+}
