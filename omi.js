@@ -34,13 +34,26 @@
     if (window.plugin_omi_ready) return;
     window.plugin_omi_ready = true;
 
-    // Шаблони карток, які декоруємо.
-    var TARGETS = [
-        'lampac_prestige_full',     // Lampac prestige — основна картка
-        'lampac_prestige_folder',   // Lampac prestige — тека/сезон
-        'online',                   // старий бандловий online-плагін
-        'online_folder'
+    // Які шаблони декоруємо.
+    //
+    // Спершу було жорстке перелічення імен — і це виявилось помилкою:
+    // онлайн-плагінів багато (online.js, online_mod.js, prestige-форки),
+    // і кожен називає шаблон по-своєму. Тому ім'я перевіряється патерном.
+    // Це дешевий тест по рядку, а не пошук по DOM, тому Template.get
+    // не сповільнюється.
+    var NAME_RE = /online|lampac|prestige/i;
+
+    // Куди вставляти рядок тегів — перший контейнер, який знайдеться.
+    var CONTAINERS = [
+        '.online-prestige__body',   // Lampac prestige
+        '.online__body',            // старий бандловий online
+        '.online-prestige',
+        '.online'
     ];
+
+    // Які шаблони плагін реально бачив — показуємо в налаштуваннях,
+    // щоб можна було з'ясувати ім'я просто з телевізора.
+    var seen = {};
 
     // Поля, які не парсимо: посилання, картинки, службове.
     var SKIP_KEYS = [
@@ -138,6 +151,32 @@
         ['res', '720p',       /\b720[pi]\b/i],
         ['res', '480p',       /\b480[pi]\b/i]
     ];
+
+    // Синоніми для зняття дублів.
+    // Балансер пише «H.265», ми — «x265»; бейдж «4K», ми — «2160p».
+    // Без цього на картці був би дубль однієї й тієї ж інформації.
+    // Обережно з короткими синонімами: «hd» збігся б із «HDR»,
+    // «sd» — із «SDR», тому їх тут немає.
+    var ALIASES = {
+        'x265':         ['x265', 'h.265', 'h265', 'hevc'],
+        'x264':         ['x264', 'h.264', 'h264', 'avc'],
+        'Dolby Vision': ['dolby vision', 'dovi'],
+        '2160p':        ['2160p', '4k', 'uhd'],
+        '1440p':        ['1440p', '2k'],
+        '1080p':        ['1080p', 'fhd'],
+        'DD+':          ['dd+', 'ddp', 'eac3', 'e-ac3'],
+        'AC3':          ['ac3', 'ac-3', 'dolby digital']
+    };
+
+    function alreadyShown(label, text) {
+        var list = ALIASES[label] || [label.toLowerCase()];
+
+        for (var i = 0; i < list.length; i++) {
+            if (text.indexOf(list[i]) !== -1) return true;
+        }
+
+        return false;
+    }
 
     // Порядок груп на картці.
     var ORDER = ['rip', 'res', 'codec', 'depth', 'dv', 'hdr',
@@ -243,21 +282,25 @@
         if (!$card || !$card.find) return;
         if ($card.find('.omi-tags').length) return;       // вже декоровано
 
-        // куди вставляти: prestige-верстка або стара online-верстка
-        var body = $card.find('.online-prestige__body');
+        var body = null;
 
-        if (!body.length) body = $card.find('.online__body');
-        if (!body.length) return;
+        for (var c = 0; c < CONTAINERS.length; c++) {
+            var found = $card.find(CONTAINERS[c]);
+
+            if (found.length) { body = found.eq(0); break; }
+        }
+
+        if (!body) return;
 
         var text = harvest(data, 0, []).join('  |  ');
         var tags = parse(text);
 
         // Не дублюємо те, що балансер уже написав у рядку info
-        // (наприклад «2160p» та «SDR» у «2160p / 6.89 GB / SDR / ↑21»).
+        // (наприклад «2160p / 18.57 GB / HDR / H.265 / Dolby Vision / ↑18»).
         var shown = ($card.text() || '').toLowerCase();
 
         tags = tags.filter(function (t) {
-            return shown.indexOf(t.label.toLowerCase()) === -1;
+            return !alreadyShown(t.label, shown);
         });
 
         if (Lampa.Storage.field(ID + '_compact')) tags = tags.slice(0, 4);
@@ -306,8 +349,11 @@
         var wrapped = function (name, vars, like_static) {
             var result = original.apply(this, arguments);
 
-            if (!like_static && TARGETS.indexOf(name) !== -1
+            if (!like_static && typeof name === 'string' && NAME_RE.test(name)
                 && Lampa.Storage.field(ID + '_enabled')) {
+
+                seen[name] = (seen[name] || 0) + 1;
+
                 try {
                     decorate(result, vars);
                 }
@@ -364,6 +410,23 @@
                 name: 'Режим діагностики',
                 description: 'Показати, які поля прислав балансер. '
                     + 'Вмикай, якщо теги не з\'являються'
+            },
+            // Показуємо, які шаблони плагін реально перехопив. Це видно
+            // прямо на телевізорі й одразу каже, чи хук взагалі спрацював:
+            // порожній список — онлайн-плагін малює картки якось інакше.
+            onRender: function (item) {
+                var names = [];
+
+                for (var n in seen) {
+                    if (Object.prototype.hasOwnProperty.call(seen, n)) {
+                        names.push(n + ' ×' + seen[n]);
+                    }
+                }
+
+                item.find('.settings-param__descr').text(names.length
+                    ? 'Перехоплені шаблони: ' + names.join(', ')
+                    : 'Шаблонів онлайн-плагіна ще не бачив. Спершу зайди '
+                      + 'в «Онлайн», потім повернись сюди');
             }
         });
     }
