@@ -5,6 +5,6 @@
   "description": "Мої плагіни для Lampa",
   "scripts": {
     "dev": "npx --yes serve src -l 8080 --cors",
-    "check": "node --check omi.js && node --check src/my-plugin.js && node --check src/tweak-example.js"
+    "check": "node --check rd.js && node --check omi.js && node --check src/my-plugin.js && node --check src/tweak-example.js"
   }
 }
