@@ -35,7 +35,7 @@
     // =====================================================================
 
     var ID  = 'rdb';
-    var VER = '1.0.0';
+    var VER = '1.1.0';
     var LOG = '[real-debrid]';
     var API = 'https://api.real-debrid.com/rest/1.0';
 
@@ -127,6 +127,8 @@
             + '.rdb-status__title{font-size:1.2em;margin-bottom:.8em}'
             + '.rdb-status__stage{font-size:1.6em;font-weight:600;margin-bottom:.6em}'
             + '.rdb-status__descr{opacity:.7}'
+            + '.rdb-status__descr--pre{white-space:pre-line;text-align:left;'
+            + 'display:inline-block;max-width:40em}'
             + '.rdb-status__bar{height:.4em;border-radius:.2em;margin:1.2em auto 0;'
             + 'max-width:30em;background:rgba(255,255,255,.15);overflow:hidden}'
             + '.rdb-status__bar > div{height:100%;width:0;background:#38a564;'
@@ -154,6 +156,48 @@
         var _this = this;
 
 
+        // Build the query the way the native Torrents screen does. It does
+        // NOT search by movie.title: it combines the original and localised
+        // titles with the year according to the parse_lang setting, and a
+        // parser tuned for that answers very differently to a bare title.
+        function parserQuery() {
+            var movie = object.movie || {};
+            var year  = ((movie.first_air_date || movie.release_date || '0000') + '').slice(0, 4);
+            var orig  = movie.original_title || movie.title || '';
+            var local = movie.title || movie.original_title || '';
+
+            var combos = {
+                'df':         orig,
+                'df_year':    orig + ' ' + year,
+                'df_lg':      orig + ' ' + local,
+                'df_lg_year': orig + ' ' + local + ' ' + year,
+                'lg':         local,
+                'lg_year':    local + ' ' + year,
+                'lg_df':      local + ' ' + orig,
+                'lg_df_year': local + ' ' + orig + ' ' + year
+            };
+
+            // jackett() calls params.movie.genres.map(...) unconditionally,
+            // so a card without genres would throw. Copy the movie instead
+            // of mutating Lampa's own object.
+            var safe = {};
+
+            for (var k in movie) {
+                if (Object.prototype.hasOwnProperty.call(movie, k)) safe[k] = movie[k];
+            }
+
+            if (!safe.genres || !safe.genres.length) safe.genres = [];
+
+            return {
+                movie: safe,
+                search: combos[Lampa.Storage.field('parse_lang')] || combos.lg_df,
+                search_one: local,
+                search_two: orig,
+                page: 1
+            };
+        }
+
+
         this.create = function () {
             this.activity.loader(true);
             inited = true;
@@ -161,7 +205,7 @@
             // The parser the user already set up in Lampa settings. It
             // resolves Jackett / Prowlarr / TorrServer on its own, so there
             // is nothing to reimplement here.
-            Lampa.Parser.get(object, function (data) {
+            Lampa.Parser.get(parserQuery(), function (data) {
                 if (!inited) return;
 
                 var list = (data && data.Results) ? data.Results : [];
@@ -171,8 +215,20 @@
                 });
 
                 _this.buildList(list);
-            }, function () {
-                if (inited) _this.empty('Парсер не відповів');
+            }, function (e) {
+                if (!inited) return;
+
+                // Show what the parser actually said, plus which parser is
+                // configured. A generic "no answer" hides the one detail
+                // that identifies the problem.
+                var reason = (typeof e === 'string' && e) ? e : 'без пояснення';
+                var type   = Lampa.Storage.field('parser_torrent_type');
+                var url    = Lampa.Storage.field('jackett_url') || '(адреса порожня)';
+
+                _this.empty('Парсер не відповів: ' + reason
+                    + '\n\nТип: ' + type
+                    + '\nАдреса: ' + url
+                    + '\nЗапит: ' + parserQuery().search);
             });
 
             return this.render();
@@ -234,9 +290,17 @@
         this.empty = function (text) {
             this.activity.loader(false);
 
+            state = 'list';
+
+            var box = $('<div class="rdb-status">'
+                + '<div class="rdb-status__descr rdb-status__descr--pre"></div></div>');
+
+            // .text() keeps the message safe; --pre makes the newlines in a
+            // diagnostic message actually show up.
+            box.find('.rdb-status__descr').text(text || 'Порожньо');
+
             scroll.clear();
-            scroll.append($('<div class="rdb-status"><div class="rdb-status__descr"></div></div>')
-                .find('.rdb-status__descr').text(text || 'Порожньо').end());
+            scroll.append(box);
 
             this.activity.toggle();
         };
