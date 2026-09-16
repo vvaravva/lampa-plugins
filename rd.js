@@ -537,7 +537,17 @@
             // Core Lampa declares its own text fields the same way:
             // select('jackett_url','',''). The official docs example omits
             // this — the docs are wrong.
-            param: { name: ID + '_token', type: 'input', values: '', default: '' },
+            // `placeholder` is required too: the row template interpolates
+            // placeholder="${data.param.placeholder}" verbatim, so omitting
+            // it puts the literal string "undefined" in the attribute, and
+            // update() then shows "undefined" as the field value.
+            param: {
+                name: ID + '_token',
+                type: 'input',
+                values: '',
+                default: '',
+                placeholder: 'Вставити токен'
+            },
             field: {
                 name: 'API-токен',
                 description: 'Взяти на real-debrid.com/apitoken'

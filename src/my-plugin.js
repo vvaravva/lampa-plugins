@@ -141,7 +141,16 @@
         // Core Lampa declares its own text fields as select('name','','').
         Lampa.SettingsApi.addParam({
             component: ID,
-            param: { name: ID + '_server', type: 'input', values: '', default: '' },
+            // `placeholder` is required as well — the row template
+            // interpolates it verbatim, so leaving it out renders the
+            // literal string "undefined" as the field value.
+            param: {
+                name: ID + '_server',
+                type: 'input',
+                values: '',
+                default: '',
+                placeholder: 'http://192.168.1.10:8090'
+            },
             field: {
                 name: Lampa.Lang.translate('myplug_settings_server'),
                 description: Lampa.Lang.translate('myplug_settings_server_descr')
