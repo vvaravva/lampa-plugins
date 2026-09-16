@@ -218,17 +218,41 @@
             }, function (e) {
                 if (!inited) return;
 
-                // Show what the parser actually said, plus which parser is
-                // configured. A generic "no answer" hides the one detail
-                // that identifies the problem.
+                // Show what the parser actually said plus the full parser
+                // configuration. Printing only jackett_url was misleading:
+                // selectParserLinks() picks the slot by parser_use_link, so
+                // with 'two' the first address is irrelevant and an empty
+                // one means nothing.
                 var reason = (typeof e === 'string' && e) ? e : 'без пояснення';
                 var type   = Lampa.Storage.field('parser_torrent_type');
-                var url    = Lampa.Storage.field('jackett_url') || '(адреса порожня)';
 
-                _this.empty('Парсер не відповів: ' + reason
-                    + '\n\nТип: ' + type
-                    + '\nАдреса: ' + url
-                    + '\nЗапит: ' + parserQuery().search);
+                var shown = function (v) { return v ? v : '(порожньо)'; };
+
+                var lines = [
+                    'Парсер не відповів: ' + reason,
+                    '',
+                    'Тип: ' + type,
+                    'Увімкнено (parser_use): ' + Lampa.Storage.field('parser_use'),
+                    'Який слот (parser_use_link): '
+                        + (Lampa.Storage.field('parser_use_link') || 'one')
+                ];
+
+                if (type === 'prowlarr') {
+                    lines.push('prowlarr_url: ' + shown(Lampa.Storage.field('prowlarr_url')));
+                    lines.push('prowlarr_url_two: ' + shown(Lampa.Storage.field('prowlarr_url_two')));
+                }
+                else if (type === 'torrserver') {
+                    lines.push('torrserver_url: ' + shown(Lampa.Storage.field('torrserver_url')));
+                    lines.push('torrserver_url_two: ' + shown(Lampa.Storage.field('torrserver_url_two')));
+                }
+                else {
+                    lines.push('jackett_url: ' + shown(Lampa.Storage.field('jackett_url')));
+                    lines.push('jackett_url_two: ' + shown(Lampa.Storage.field('jackett_url_two')));
+                }
+
+                lines.push('Запит: ' + parserQuery().search);
+
+                _this.empty(lines.join('\n'));
             });
 
             return this.render();
