@@ -133,10 +133,15 @@
             field: { name: Lampa.Lang.translate('myplug_settings_mode') }
         });
 
-        // input — a text field
+        // input — a text field.
+        // `values` must be a STRING here. The settings renderer does
+        //     typeof values[name] == 'string' ? key : values[name][key] ...
+        // so omitting it leaves values[name] undefined and opening Settings
+        // throws "Cannot read properties of undefined (reading '')".
+        // Core Lampa declares its own text fields as select('name','','').
         Lampa.SettingsApi.addParam({
             component: ID,
-            param: { name: ID + '_server', type: 'input', default: '' },
+            param: { name: ID + '_server', type: 'input', values: '', default: '' },
             field: {
                 name: Lampa.Lang.translate('myplug_settings_server'),
                 description: Lampa.Lang.translate('myplug_settings_server_descr')

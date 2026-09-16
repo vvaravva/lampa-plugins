@@ -527,7 +527,17 @@
 
         Lampa.SettingsApi.addParam({
             component: ID,
-            param: { name: ID + '_token', type: 'input', default: '' },
+            // `values` must be a STRING for type:'input'. The settings
+            // renderer does:
+            //     typeof values[name] == 'string'
+            //         ? key
+            //         : values[name][key] || values[name][defaults[name]]
+            // so leaving it out makes values[name] undefined and the screen
+            // dies with "Cannot read properties of undefined (reading '')".
+            // Core Lampa declares its own text fields the same way:
+            // select('jackett_url','',''). The official docs example omits
+            // this — the docs are wrong.
+            param: { name: ID + '_token', type: 'input', values: '', default: '' },
             field: {
                 name: 'API-токен',
                 description: 'Взяти на real-debrid.com/apitoken'
