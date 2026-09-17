@@ -35,7 +35,7 @@
     // =====================================================================
 
     var ID  = 'rdb';
-    var VER = '1.2.0';
+    var VER = '1.3.0';
     var LOG = '[real-debrid]';
     var API = 'https://api.real-debrid.com/rest/1.0';
 
@@ -155,6 +155,7 @@
             + '.rdb-item__title{font-size:1.05em;line-height:1.3;margin-bottom:.5em}'
             + '.rdb-item__meta{display:flex;flex-wrap:wrap;opacity:.7;font-size:.9em}'
             + '.rdb-item__meta > *{margin-right:1.2em}'
+            + '.rdb-head{padding:0 .2em .8em;opacity:.55;font-size:.9em}'
             + '.rdb-status{padding:2em 1em;text-align:center}'
             + '.rdb-status__title{font-size:1.2em;margin-bottom:.8em}'
             + '.rdb-status__stage{font-size:1.6em;font-weight:600;margin-bottom:.6em}'
@@ -300,6 +301,17 @@
 
             scroll.clear();
             items = [];
+
+            // Header doubles as diagnostics: which build is actually running
+            // and whether the token survived. Both were guessed at otherwise,
+            // and a stale cached copy looks exactly like a broken new one.
+            var tok = token();
+
+            scroll.append($('<div class="rdb-head"></div>').text(
+                'v' + VER
+                + ' · токен: ' + (tok ? tok.length + ' симв.' : 'відсутній')
+                + ' · релізів: ' + list.length
+            ));
 
             list.forEach(function (element) {
                 var magnet = magnetOf(element);
