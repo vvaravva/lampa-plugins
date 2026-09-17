@@ -35,7 +35,7 @@
     // =====================================================================
 
     var ID  = 'rdb';
-    var VER = '2.1.0';
+    var VER = '2.2.0';
     var LOG = '[real-debrid]';
     var API = 'https://api.real-debrid.com/rest/1.0';
 
@@ -67,8 +67,13 @@
         403: 'доступ заборонено — акаунт заблоковано або без преміуму',
         404: 'такого ресурсу немає',
         429: 'забагато запитів, RD тимчасово обмежив',
-        451: 'RD відмовився брати цю роздачу (infringing file) — '
-           + 'це його політика, спробуй інший реліз',
+        // Not a per-title takedown: since May 2026 RD runs an automatic
+        // filter over file NAMES (WEB-DL, WEBRip, AMZN, NF, CR, YTS, RARBG
+        // and similar release tags), added under a formal notice from the
+        // French FNEF. The same film passes under one release name and not
+        // under another.
+        451: 'RD блокує за ключовими словами в назві '
+           + '(WEB-DL, WEBRip, AMZN, YTS…) — фільтр діє з травня 2026',
         503: 'сервіс RD недоступний'
     };
 
