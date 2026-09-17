@@ -35,7 +35,7 @@
     // =====================================================================
 
     var ID  = 'rdb';
-    var VER = '1.5.0';
+    var VER = '1.6.0';
     var LOG = '[real-debrid]';
     var API = 'https://api.real-debrid.com/rest/1.0';
 
@@ -59,13 +59,29 @@
     // native Android bridge and jQuery report failures differently, and a
     // generic "request failed" hides the one line that names the cause —
     // RD answers with a JSON body such as {"error":"bad_token"}.
+    // The Android bridge reports only the status code and its own exception
+    // text — RD's JSON body (which carries error_code) never reaches us. So
+    // the status has to carry the meaning on its own.
+    var STATUS = {
+        401: 'токен недійсний або протух (bad_token)',
+        403: 'доступ заборонено — акаунт заблоковано або без преміуму',
+        404: 'такого ресурсу немає',
+        429: 'забагато запитів, RD тимчасово обмежив',
+        451: 'RD відмовився брати цю роздачу (infringing file) — '
+           + 'це його політика, спробуй інший реліз',
+        503: 'сервіс RD недоступний'
+    };
+
     function describe(e) {
         if (!e) return 'відповіді немає';
         if (typeof e === 'string') return e.slice(0, 300);
 
         var parts = [];
 
-        if (e.status) parts.push('HTTP ' + e.status);
+        if (e.status) {
+            parts.push('HTTP ' + e.status
+                + (STATUS[e.status] ? ' — ' + STATUS[e.status] : ''));
+        }
 
         // jQuery reports responseText/statusText; the Android bridge builds
         // its own object instead — AndroidJS.kt:
