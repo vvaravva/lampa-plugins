@@ -35,7 +35,7 @@
     // =====================================================================
 
     var ID  = 'rdb';
-    var VER = '2.3.0';
+    var VER = '2.4.0';
     var LOG = '[real-debrid]';
     var API = 'https://api.real-debrid.com/rest/1.0';
 
@@ -899,36 +899,51 @@
 
             if (mode === 'inner' || mode === 'android') item.launch_player = mode;
 
-            // Nothing here reports whether a player actually came up: the
-            // screen just sits at "Запускаємо…". Watch the player's own
-            // events and say which route was taken, or that none answered.
-            var answered = false;
+            // Lampa's 'external' event only proves it called the bridge, not
+            // that Android started anything. runPlayer() can just as well
+            // find no matching activity, or launch a remembered app that
+            // never comes up — and the screen then sits at "Запускаємо…"
+            // forever.
+            //
+            // What is observable from here: a real external player puts
+            // LAMPA in the background, which the WebView sees as a
+            // visibility change. No backgrounding within a few seconds means
+            // nothing opened — so play it with the built-in player instead
+            // of leaving the user staring at a dead screen.
+            var external = mode === 'android'
+                || (mode !== 'inner' && Lampa.Storage.field('player') === 'android');
 
-            var onAny = function (name) {
-                return function () {
-                    answered = true;
-                    if (_this.detail) _this.detail('плеєр відповів: ' + name);
-                };
-            };
+            if (!external) return;
 
-            var onStart    = onAny('вбудований');
-            var onExternal = onAny('зовнішній застосунок');
+            var went_away = false;
+            var done      = false;
 
-            Lampa.Player.listener.follow('start', onStart);
-            Lampa.Player.listener.follow('external', onExternal);
+            var onHide = function () { if (document.hidden) went_away = true; };
+            var onBlur = function () { went_away = true; };
+
+            document.addEventListener('visibilitychange', onHide);
+            window.addEventListener('blur', onBlur);
 
             setTimeout(function () {
-                Lampa.Player.listener.remove('start', onStart);
-                Lampa.Player.listener.remove('external', onExternal);
+                document.removeEventListener('visibilitychange', onHide);
+                window.removeEventListener('blur', onBlur);
 
-                if (answered || !inited || !_this.detail) return;
+                if (done || went_away || !inited) return;
 
-                _this.detail('Плеєр не відповів.'
-                    + '\nрежим плагіна: ' + mode
-                    + '\nплеєр Lampa (player): ' + Lampa.Storage.field('player')
-                    + '\nЯкщо обрано зовнішній — перевір, що застосунок '
-                    + 'вибрано. Скинути вибір: Налаштування → Плеєр.');
-            }, 4000);
+                done = true;
+
+                if (_this.detail) {
+                    _this.detail('Зовнішній застосунок не відкрився — '
+                        + 'програємо вбудованим.'
+                        + '\nЩоб обрати застосунок: Налаштування → Плеєр → '
+                        + 'Скинути плеєр за замовчуванням.');
+                }
+
+                item.launch_player = 'inner';
+
+                Lampa.Player.play(item);
+                Lampa.Player.playlist([item]);
+            }, 6000);
 
             Lampa.Player.play(item);
             Lampa.Player.playlist([item]);
