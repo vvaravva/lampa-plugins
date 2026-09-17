@@ -35,7 +35,7 @@
     // =====================================================================
 
     var ID  = 'rdb';
-    var VER = '1.7.0';
+    var VER = '1.8.0';
     var LOG = '[real-debrid]';
     var API = 'https://api.real-debrid.com/rest/1.0';
 
@@ -183,6 +183,134 @@
         }
 
         return keys.join(', ');
+    }
+
+    // =====================================================================
+    //  INFOHASH FROM A .torrent
+    //
+    //  A private tracker publishes a file, not a magnet, and the file cannot
+    //  be forwarded to RD: Lampa's Android bridge does GET and POST with a
+    //  String body only, so PUT /torrents/addTorrent is unreachable.
+    //
+    //  The infohash is the SHA-1 of the bencoded `info` dictionary exactly as
+    //  it appears in the file — so it has to be hashed over the original
+    //  bytes, not over anything re-encoded. Hence: locate the byte span of
+    //  that value and hash the slice verbatim.
+    //
+    //  SHA-1 is done by hand rather than through crypto.subtle: the latter is
+    //  async and missing on older Android WebViews, both of which this code
+    //  would rather not depend on.
+    // =====================================================================
+
+    function sha1Hex(str) {
+        function rol(n, s) { return (n << s) | (n >>> (32 - s)); }
+
+        var l = str.length;
+        var total = (((l + 8) >> 6) + 1) * 16;
+        var w = [];
+        var i, j;
+
+        for (i = 0; i < total; i++) w[i] = 0;
+        for (i = 0; i < l; i++) {
+            w[i >> 2] |= (str.charCodeAt(i) & 0xff) << (24 - (i % 4) * 8);
+        }
+
+        w[l >> 2] |= 0x80 << (24 - (l % 4) * 8);
+        w[total - 1] = l * 8;
+
+        var h0 = 0x67452301, h1 = 0xEFCDAB89, h2 = 0x98BADCFE,
+            h3 = 0x10325476, h4 = 0xC3D2E1F0;
+
+        var x = [];
+
+        for (i = 0; i < total; i += 16) {
+            for (j = 0; j < 16; j++) x[j] = w[i + j] | 0;
+            for (j = 16; j < 80; j++) {
+                x[j] = rol(x[j - 3] ^ x[j - 8] ^ x[j - 14] ^ x[j - 16], 1);
+            }
+
+            var a = h0, b = h1, c = h2, d = h3, e = h4, f, k, t;
+
+            for (j = 0; j < 80; j++) {
+                if (j < 20)      { f = (b & c) | (~b & d);          k = 0x5A827999; }
+                else if (j < 40) { f = b ^ c ^ d;                   k = 0x6ED9EBA1; }
+                else if (j < 60) { f = (b & c) | (b & d) | (c & d); k = 0x8F1BBCDC; }
+                else             { f = b ^ c ^ d;                   k = 0xCA62C1D6; }
+
+                t = (rol(a, 5) + f + e + k + x[j]) | 0;
+                e = d; d = c; c = rol(b, 30); b = a; a = t;
+            }
+
+            h0 = (h0 + a) | 0; h1 = (h1 + b) | 0; h2 = (h2 + c) | 0;
+            h3 = (h3 + d) | 0; h4 = (h4 + e) | 0;
+        }
+
+        var out = '';
+
+        [h0, h1, h2, h3, h4].forEach(function (h) {
+            for (var s = 7; s >= 0; s--) out += ((h >>> (s * 4)) & 0xf).toString(16);
+        });
+
+        return out;
+    }
+
+    // Index just past the bencoded value that starts at i.
+    function bspan(s, i) {
+        var c = s.charAt(i);
+
+        if (c === 'i') {
+            var e = s.indexOf('e', i);
+
+            if (e === -1) throw new Error('обірване число');
+
+            return e + 1;
+        }
+
+        if (c === 'l' || c === 'd') {
+            i++;
+
+            while (s.charAt(i) !== 'e') {
+                if (i >= s.length) throw new Error('обірваний список');
+                i = bspan(s, i);
+            }
+
+            return i + 1;
+        }
+
+        var colon = s.indexOf(':', i);
+
+        if (colon === -1) throw new Error('немає довжини рядка');
+
+        var len = parseInt(s.slice(i, colon), 10);
+
+        if (isNaN(len)) throw new Error('пошкоджена довжина');
+
+        return colon + 1 + len;
+    }
+
+    // SHA-1 of the raw bytes of the top-level `info` value.
+    function infoHashOf(raw) {
+        if (raw.charAt(0) !== 'd') throw new Error('це не bencode-словник');
+
+        var i = 1;
+
+        while (i < raw.length && raw.charAt(i) !== 'e') {
+            var colon = raw.indexOf(':', i);
+
+            if (colon === -1) throw new Error('пошкоджений ключ');
+
+            var klen   = parseInt(raw.slice(i, colon), 10);
+            var kstart = colon + 1;
+            var key    = raw.slice(kstart, kstart + klen);
+            var vstart = kstart + klen;
+            var vend   = bspan(raw, vstart);
+
+            if (key === 'info') return sha1Hex(raw.slice(vstart, vend));
+
+            i = vend;
+        }
+
+        throw new Error('у торенті немає info');
     }
 
     function biggestVideo(files) {
@@ -409,7 +537,7 @@
                             + 'Налаштування → Real-Debrid');
                     }
 
-                    if (!magnet) return _this.probe(element);
+                    if (!magnet) return _this.fromTorrent(element);
 
                     _this.run(element, magnet);
                 });
@@ -498,18 +626,12 @@
         };
 
 
-        // ── probe: can the .torrent even be fetched? ────────────────────
+        // ── a release that has only a .torrent ──────────────────────────
         //
-        // Releases from a private tracker arrive with only a Link to a
-        // .torrent file. Real-Debrid cannot be handed that file: Lampa's
-        // Android bridge does GET and POST with a string body only, so
-        // PUT /torrents/addTorrent is off the table.
-        //
-        // The way round it is to read the infohash out of the file and build
-        // a magnet. Before writing a bencode scanner and SHA-1 for that, this
-        // checks the assumption everything else rests on — that the file is
-        // reachable at all and really is a torrent, not a login page.
-        this.probe = function (element) {
+        // Fetch the file, read its infohash, and carry on down the normal
+        // magnet path. base64 keeps the bytes intact — read as text they
+        // would be mangled before they could be hashed.
+        this.fromTorrent = function (element) {
             var link = element.Link || element.link || '';
 
             this.showStatus(element.Title || '');
@@ -519,35 +641,41 @@
                     'Поля парсера: ' + fieldsOf(element));
             }
 
-            this.stage('Пробуємо завантажити .torrent…');
+            this.stage('Завантажуємо .torrent…');
 
-            // base64 keeps the bytes intact; a plain response would be
-            // mangled the moment it is treated as text.
             network.native(link, function (b64) {
                 if (!inited) return;
 
-                var raw = '', size = 0, first = '';
+                var raw;
 
                 try {
-                    raw   = atob((b64 + '').replace(/\s/g, ''));
-                    size  = raw.length;
-                    first = raw.slice(0, 48).replace(/[^\x20-\x7e]/g, '.');
+                    raw = atob((b64 + '').replace(/\s/g, ''));
                 }
                 catch (x) {
-                    first = '(не base64) ' + (b64 + '').slice(0, 60);
+                    return _this.fail('Відповідь не схожа на файл',
+                        (b64 + '').slice(0, 120));
                 }
 
-                // a bencoded torrent always starts with a dictionary: 'd'
-                var looks = raw.charAt(0) === 'd';
+                var hash;
 
-                _this.stage(looks ? 'Це справжній .torrent' : 'Це не .torrent');
-                _this.detail('розмір: ' + size + ' Б\nпочаток: ' + first
-                    + '\n\nПоля парсера: ' + fieldsOf(element));
+                try {
+                    hash = infoHashOf(raw);
+                }
+                catch (x) {
+                    return _this.fail('Не вдалося прочитати .torrent',
+                        x.message + '\nрозмір: ' + raw.length + ' Б'
+                        + '\nпочаток: '
+                        + raw.slice(0, 48).replace(/[^\x20-\x7e]/g, '.'));
+                }
+
+                _this.stage('infohash ' + hash.slice(0, 12) + '…');
+
+                _this.run(element, 'magnet:?xt=urn:btih:' + hash
+                    + '&dn=' + encodeURIComponent(element.Title || ''));
             }, function (e) {
                 if (!inited) return;
 
-                _this.fail('.torrent не завантажився', describe(e)
-                    + '\n\nПоля парсера: ' + fieldsOf(element));
+                _this.fail('.torrent не завантажився', describe(e));
             }, false, { dataType: 'base64', timeout: 20000 });
         };
 
