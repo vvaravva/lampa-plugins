@@ -35,7 +35,7 @@
     // =====================================================================
 
     var ID  = 'rdb';
-    var VER = '1.4.0';
+    var VER = '1.5.0';
     var LOG = '[real-debrid]';
     var API = 'https://api.real-debrid.com/rest/1.0';
 
@@ -230,6 +230,7 @@
         var state   = 'list';    // 'list' | 'work'
         var timer   = null;      // poll timeout id
         var torrent = null;      // id of the torrent added to RD
+        var head    = null;      // header element, also the diagnostics line
 
         var _this = this;
 
@@ -352,11 +353,19 @@
             // and a stale cached copy looks exactly like a broken new one.
             var tok = token();
 
-            scroll.append($('<div class="rdb-head"></div>').text(
+            head = $('<div class="rdb-head"></div>').text(
                 'v' + VER
                 + ' · токен: ' + (tok ? tok.length + ' симв.' : 'відсутній')
                 + ' · релізів: ' + list.length
-            ));
+            );
+
+            scroll.append(head);
+
+            // Ask RD who we are straight away. A bad token otherwise only
+            // shows up after picking a release and waiting — this answers it
+            // before the first choice, and distinguishes an invalid token
+            // (401 bad_token) from a locked account (403).
+            this.checkAccount();
 
             list.forEach(function (element) {
                 var magnet = magnetOf(element);
@@ -398,6 +407,28 @@
             });
 
             this.activity.toggle();
+        };
+
+
+        // GET /user — the cheapest possible proof that the token works.
+        // Success also tells premium from free, which matters: a free
+        // account authenticates fine but cannot unrestrict anything.
+        this.checkAccount = function () {
+            if (!token()) return;
+
+            rdCall(network, '/user', false, function (u) {
+                if (!inited || !head) return;
+
+                var type = (u && u.type) ? u.type : '?';
+                var till = (u && u.expiration)
+                    ? ' до ' + (u.expiration + '').slice(0, 10) : '';
+
+                head.text(head.text() + ' · RD: ' + type + till);
+            }, function (e) {
+                if (!inited || !head) return;
+
+                head.text(head.text() + ' · RD: ' + e);
+            });
         };
 
 
