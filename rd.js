@@ -35,7 +35,7 @@
     // =====================================================================
 
     var ID  = 'rdb';
-    var VER = '2.0.0';
+    var VER = '2.1.0';
     var LOG = '[real-debrid]';
     var API = 'https://api.real-debrid.com/rest/1.0';
 
@@ -824,14 +824,47 @@
                     : undefined
             };
 
-            // On Android Lampa defaults to handing the link to an external
-            // player. Player.start() honours data.launch_player, so 'inner'
-            // keeps playback inside Lampa — the safer route for a plain
-            // direct https link, and it removes a whole class of "nothing
-            // happened" caused by no external player being set up.
-            if (Lampa.Storage.field(ID + '_player') === 'inner') {
-                item.launch_player = 'inner';
-            }
+            // Player.start() picks its branch like this:
+            //   launch_player == 'inner'                    → built-in
+            //   android && (field('player') == 'android'
+            //               || launch_player == 'android')  → external app
+            // so launch_player forces either route regardless of the app's
+            // own setting. 'android' is what hands the link to VLC and the
+            // rest, through AndroidJS.openPlayer.
+            var mode = Lampa.Storage.field(ID + '_player');
+
+            if (mode === 'inner' || mode === 'android') item.launch_player = mode;
+
+            // Nothing here reports whether a player actually came up: the
+            // screen just sits at "Запускаємо…". Watch the player's own
+            // events and say which route was taken, or that none answered.
+            var answered = false;
+
+            var onAny = function (name) {
+                return function () {
+                    answered = true;
+                    if (_this.detail) _this.detail('плеєр відповів: ' + name);
+                };
+            };
+
+            var onStart    = onAny('вбудований');
+            var onExternal = onAny('зовнішній застосунок');
+
+            Lampa.Player.listener.follow('start', onStart);
+            Lampa.Player.listener.follow('external', onExternal);
+
+            setTimeout(function () {
+                Lampa.Player.listener.remove('start', onStart);
+                Lampa.Player.listener.remove('external', onExternal);
+
+                if (answered || !inited || !_this.detail) return;
+
+                _this.detail('Плеєр не відповів.'
+                    + '\nрежим плагіна: ' + mode
+                    + '\nплеєр Lampa (player): ' + Lampa.Storage.field('player')
+                    + '\nЯкщо обрано зовнішній — перевір, що застосунок '
+                    + 'вибрано. Скинути вибір: Налаштування → Плеєр.');
+            }, 4000);
 
             Lampa.Player.play(item);
             Lampa.Player.playlist([item]);
@@ -998,13 +1031,18 @@
             param: {
                 name: ID + '_player',
                 type: 'select',
-                values: { inner: 'Вбудований', system: 'Як у налаштуваннях Lampa' },
-                default: 'inner'
+                values: {
+                    android: 'Зовнішній (VLC та інші)',
+                    inner:   'Вбудований у Lampa',
+                    system:  'Як у налаштуваннях Lampa'
+                },
+                default: 'android'
             },
             field: {
                 name: 'Чим відтворювати',
-                description: 'Вбудований надійніший для прямого посилання. '
-                    + 'Другий варіант віддає лінк зовнішньому плеєру'
+                description: 'Зовнішній віддає посилання застосунку на кшталт '
+                    + 'VLC. Якщо застосунок не відкривається — скинь вибір '
+                    + 'плеєра в налаштуваннях Lampa і обери заново'
             }
         });
     }
