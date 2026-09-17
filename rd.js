@@ -35,7 +35,7 @@
     // =====================================================================
 
     var ID  = 'rdb';
-    var VER = '1.8.0';
+    var VER = '1.9.0';
     var LOG = '[real-debrid]';
     var API = 'https://api.real-debrid.com/rest/1.0';
 
@@ -492,6 +492,11 @@
             scroll.clear();
             items = [];
 
+            // scroll.clear() detaches the old rows, so a remembered `last`
+            // would point at a node no longer in the document and
+            // collectionFocus would aim the remote at nothing.
+            last = false;
+
             // Header doubles as diagnostics: which build is actually running
             // and whether the token survived. Both were guessed at otherwise,
             // and a stale cached copy looks exactly like a broken new one.
@@ -834,8 +839,13 @@
 
         // ── lifecycle ───────────────────────────────────────────────────
         this.start = function () {
-            if (Lampa.Activity.active().activity !== this.activity) return;
-
+            // No "am I the active activity?" guard here. ActivitySlide.start()
+            // registers its own 'content' controller with invisible:true whose
+            // toggle does Controller.clear(), and only then calls
+            // component.start(). Bailing out early leaves that empty
+            // controller in charge — the list renders but nothing is
+            // focusable, so the remote does nothing and the list never
+            // scrolls. Native components register unconditionally.
             Lampa.Controller.add('content', {
                 toggle: function () {
                     Lampa.Controller.collectionSet(scroll.render());
