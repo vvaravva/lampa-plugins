@@ -35,7 +35,7 @@
     // =====================================================================
 
     var ID  = 'rdb';
-    var VER = '1.1.0';
+    var VER = '1.2.0';
     var LOG = '[real-debrid]';
     var API = 'https://api.real-debrid.com/rest/1.0';
 
@@ -80,8 +80,17 @@
         return parts.join('&');
     }
 
-    // RD needs a magnet. Parsers usually provide one; some only give a link
-    // to a .torrent file, which would need a binary upload — out of scope.
+    // RD needs a magnet.
+    //
+    // Public trackers hand one over directly. Private ones (Toloka, for
+    // example) only publish a .torrent file — but Jackett and JacRed still
+    // report the infohash next to it, and a magnet built from the infohash
+    // alone is enough for Real-Debrid: it finds peers itself, so no tracker
+    // list is required.
+    //
+    // NB: element.hash is NOT the infohash. jackett() overwrites it with
+    //     element.hash = Utils.hash(element.Title)
+    // i.e. a hash of the title. Using it would send RD a bogus torrent.
     function magnetOf(element) {
         var magnet = element.MagnetUri || element.magnet || '';
 
@@ -91,7 +100,30 @@
 
         if (link.indexOf('magnet:') === 0) return link;
 
+        var ih = (element.InfoHash || element.infoHash || element.info_hash || '') + '';
+
+        ih = ih.trim();
+
+        // 40 hex chars (btih v1) or 32 base32 chars
+        if (/^[a-f0-9]{40}$/i.test(ih) || /^[a-z2-7]{32}$/i.test(ih)) {
+            return 'magnet:?xt=urn:btih:' + ih
+                + '&dn=' + encodeURIComponent(element.Title || '');
+        }
+
         return '';
+    }
+
+    // Used when a release yields no magnet at all: listing the fields the
+    // parser actually returned says whether another identifier is available,
+    // instead of leaving it at "not supported".
+    function fieldsOf(element) {
+        var keys = [];
+
+        for (var k in element) {
+            if (Object.prototype.hasOwnProperty.call(element, k)) keys.push(k);
+        }
+
+        return keys.join(', ');
     }
 
     function biggestVideo(files) {
@@ -296,8 +328,9 @@
                     }
 
                     if (!magnet) {
-                        return Lampa.Noty.show('У цього релізу немає magnet — '
-                            + 'Real-Debrid його не прийме');
+                        return Lampa.Noty.show('Немає ні magnet, ні InfoHash. '
+                            + 'Поля парсера: ' + fieldsOf(element),
+                            { time: 12000 });
                     }
 
                     _this.run(element, magnet);
