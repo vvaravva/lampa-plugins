@@ -35,7 +35,7 @@
     // =====================================================================
 
     var ID  = 'rdb';
-    var VER = '1.9.0';
+    var VER = '2.0.0';
     var LOG = '[real-debrid]';
     var API = 'https://api.real-debrid.com/rest/1.0';
 
@@ -424,6 +424,15 @@
         this.create = function () {
             this.activity.loader(true);
             inited = true;
+
+            // Without this the scroll element has no bounded height, so in
+            // maxOffset()
+            //     w = html.offsetHeight            // == content height
+            //     offset = max(-(max(s, w) - w), offset)
+            // the range collapses to zero and every scroll position clamps to
+            // 0 — the list simply never moves. minus() adds layer--wheight,
+            // which is what gives the element a viewport-bound height.
+            scroll.minus();
 
             // The parser the user already set up in Lampa settings. It
             // resolves Jackett / Prowlarr / TorrServer on its own, so there
@@ -815,6 +824,15 @@
                     : undefined
             };
 
+            // On Android Lampa defaults to handing the link to an external
+            // player. Player.start() honours data.launch_player, so 'inner'
+            // keeps playback inside Lampa — the safer route for a plain
+            // direct https link, and it removes a whole class of "nothing
+            // happened" caused by no external player being set up.
+            if (Lampa.Storage.field(ID + '_player') === 'inner') {
+                item.launch_player = 'inner';
+            }
+
             Lampa.Player.play(item);
             Lampa.Player.playlist([item]);
 
@@ -972,6 +990,21 @@
             field: {
                 name: 'API-токен',
                 description: 'Взяти на real-debrid.com/apitoken'
+            }
+        });
+
+        Lampa.SettingsApi.addParam({
+            component: ID,
+            param: {
+                name: ID + '_player',
+                type: 'select',
+                values: { inner: 'Вбудований', system: 'Як у налаштуваннях Lampa' },
+                default: 'inner'
+            },
+            field: {
+                name: 'Чим відтворювати',
+                description: 'Вбудований надійніший для прямого посилання. '
+                    + 'Другий варіант віддає лінк зовнішньому плеєру'
             }
         });
     }
