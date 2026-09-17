@@ -35,7 +35,7 @@
     // =====================================================================
 
     var ID  = 'rdb';
-    var VER = '1.6.0';
+    var VER = '1.7.0';
     var LOG = '[real-debrid]';
     var API = 'https://api.real-debrid.com/rest/1.0';
 
@@ -409,11 +409,7 @@
                             + 'Налаштування → Real-Debrid');
                     }
 
-                    if (!magnet) {
-                        return Lampa.Noty.show('Немає ні magnet, ні InfoHash. '
-                            + 'Поля парсера: ' + fieldsOf(element),
-                            { time: 12000 });
-                    }
+                    if (!magnet) return _this.probe(element);
 
                     _this.run(element, magnet);
                 });
@@ -499,6 +495,60 @@
             };
 
             Lampa.Controller.collectionSet(scroll.render());
+        };
+
+
+        // ── probe: can the .torrent even be fetched? ────────────────────
+        //
+        // Releases from a private tracker arrive with only a Link to a
+        // .torrent file. Real-Debrid cannot be handed that file: Lampa's
+        // Android bridge does GET and POST with a string body only, so
+        // PUT /torrents/addTorrent is off the table.
+        //
+        // The way round it is to read the infohash out of the file and build
+        // a magnet. Before writing a bencode scanner and SHA-1 for that, this
+        // checks the assumption everything else rests on — that the file is
+        // reachable at all and really is a torrent, not a login page.
+        this.probe = function (element) {
+            var link = element.Link || element.link || '';
+
+            this.showStatus(element.Title || '');
+
+            if (!link) {
+                return this.fail('Немає ні magnet, ні InfoHash, ні Link',
+                    'Поля парсера: ' + fieldsOf(element));
+            }
+
+            this.stage('Пробуємо завантажити .torrent…');
+
+            // base64 keeps the bytes intact; a plain response would be
+            // mangled the moment it is treated as text.
+            network.native(link, function (b64) {
+                if (!inited) return;
+
+                var raw = '', size = 0, first = '';
+
+                try {
+                    raw   = atob((b64 + '').replace(/\s/g, ''));
+                    size  = raw.length;
+                    first = raw.slice(0, 48).replace(/[^\x20-\x7e]/g, '.');
+                }
+                catch (x) {
+                    first = '(не base64) ' + (b64 + '').slice(0, 60);
+                }
+
+                // a bencoded torrent always starts with a dictionary: 'd'
+                var looks = raw.charAt(0) === 'd';
+
+                _this.stage(looks ? 'Це справжній .torrent' : 'Це не .torrent');
+                _this.detail('розмір: ' + size + ' Б\nпочаток: ' + first
+                    + '\n\nПоля парсера: ' + fieldsOf(element));
+            }, function (e) {
+                if (!inited) return;
+
+                _this.fail('.torrent не завантажився', describe(e)
+                    + '\n\nПоля парсера: ' + fieldsOf(element));
+            }, false, { dataType: 'base64', timeout: 20000 });
         };
 
 
