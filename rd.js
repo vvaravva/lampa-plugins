@@ -35,12 +35,13 @@
     // =====================================================================
 
     var ID  = 'rdb';
-    var VER = '2.2.0';
+    var VER = '2.3.0';
     var LOG = '[real-debrid]';
     var API = 'https://api.real-debrid.com/rest/1.0';
 
-    var POLL_MS   = 2000;   // how often to ask RD for torrent status
-    var POLL_MAX  = 900;    // give up after ~30 minutes of waiting
+    var POLL_MS     = 2000;  // how often to ask RD for torrent status
+    var POLL_MAX    = 900;   // downloading: give up after ~30 minutes
+    var CONVERT_MAX = 45;    // resolving a magnet: ~90s is already hopeless
 
     var VIDEO_EXT = ['mkv', 'mp4', 'avi', 'm4v', 'mov', 'ts', 'm2ts', 'wmv', 'mpg', 'mpeg'];
 
@@ -291,6 +292,40 @@
         if (isNaN(len)) throw new Error('пошкоджена довжина');
 
         return colon + 1 + len;
+    }
+
+    // Announce URLs from the file: `announce` plus every entry of
+    // `announce-list`. A magnet carrying only an infohash leaves RD to find
+    // peers over DHT, which torrents from a private tracker switch off — so
+    // without these it can sit resolving forever.
+    //
+    // These URLs usually embed a personal passkey. Handing them to RD means
+    // RD's servers announce to the tracker as that user, which private
+    // trackers generally treat as a violation. Hence: opt-in only.
+    function trackersOf(raw) {
+        var out = [];
+
+        var add = function (u) {
+            if (/^(https?|udp):\/\//i.test(u) && out.indexOf(u) === -1) out.push(u);
+        };
+
+        // announce-list is a list of lists of byte strings; walking the
+        // bencode generically is overkill — pull the strings out directly.
+        var re = /(\d+):/g;
+        var m;
+
+        while ((m = re.exec(raw))) {
+            var len   = parseInt(m[1], 10);
+            var start = m.index + m[0].length;
+
+            if (isNaN(len) || len < 8 || len > 300) continue;
+
+            var val = raw.slice(start, start + len);
+
+            if (/^(https?|udp):\/\/[^\s]+$/i.test(val)) add(val);
+        }
+
+        return out;
     }
 
     // SHA-1 of the raw bytes of the top-level `info` value.
@@ -687,10 +722,23 @@
                         + raw.slice(0, 48).replace(/[^\x20-\x7e]/g, '.'));
                 }
 
-                _this.stage('infohash ' + hash.slice(0, 12) + '…');
+                var magnet = 'magnet:?xt=urn:btih:' + hash
+                    + '&dn=' + encodeURIComponent(element.Title || '');
 
-                _this.run(element, 'magnet:?xt=urn:btih:' + hash
-                    + '&dn=' + encodeURIComponent(element.Title || ''));
+                var trackers = [];
+
+                if (Lampa.Storage.field(ID + '_trackers')) {
+                    trackers = trackersOf(raw);
+
+                    trackers.forEach(function (t) {
+                        magnet += '&tr=' + encodeURIComponent(t);
+                    });
+                }
+
+                _this.stage('infohash ' + hash.slice(0, 12) + '…'
+                    + (trackers.length ? ' · трекерів: ' + trackers.length : ''));
+
+                _this.run(element, magnet);
             }, function (e) {
                 if (!inited) return;
 
@@ -724,8 +772,19 @@
         // Wait until RD has resolved the magnet and knows the file list.
         this.waitFiles = function (tick) {
             if (!inited) return;
-            if (tick > POLL_MAX) return _this.fail('Real-Debrid надто довго '
-                + 'обробляє цю роздачу');
+
+            // Resolving a magnet is quick when it can be resolved at all.
+            // Dragging on means RD cannot find peers — the usual cause is a
+            // magnet built from a bare infohash for a private-tracker
+            // torrent, where DHT is disabled and RD has no announce URL.
+            // Waiting out POLL_MAX here would mean half an hour of nothing.
+            if (tick > CONVERT_MAX) {
+                return _this.fail('RD не може знайти цю роздачу',
+                    'Магніт зібрано лише з infohash, без трекерів. Для роздач '
+                    + 'приватних трекерів DHT вимкнено, тож знайти піри нема '
+                    + 'як.\n\nУ налаштуваннях плагіна є «Додавати трекери з '
+                    + '.torrent» — читай опис, там є суттєве застереження.');
+            }
 
             rdCall(network, '/torrents/info/' + torrent, false, function (info) {
                 if (!inited) return;
@@ -1028,6 +1087,20 @@
             field: {
                 name: 'API-токен',
                 description: 'Взяти на real-debrid.com/apitoken'
+            }
+        });
+
+        Lampa.SettingsApi.addParam({
+            component: ID,
+            param: { name: ID + '_trackers', type: 'trigger', default: false },
+            field: {
+                name: 'Додавати трекери з .torrent',
+                description: 'Без цього роздачі приватних трекерів RD не '
+                    + 'знаходить: у магніті лише infohash, а DHT для них '
+                    + 'вимкнено. УВАГА: адреси анонсу містять твій passkey, '
+                    + 'тож сервери RD анонсуватимуться на трекер від твого '
+                    + 'імені. Приватні трекери зазвичай вважають це '
+                    + 'порушенням правил'
             }
         });
 
