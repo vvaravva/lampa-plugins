@@ -67,7 +67,12 @@
 
         if (e.status) parts.push('HTTP ' + e.status);
 
-        var body = e.responseText || e.statusText || e.error || '';
+        // jQuery reports responseText/statusText; the Android bridge builds
+        // its own object instead — AndroidJS.kt:
+        //     putSafe("status", http.lastErrorCode)
+        //     putSafe("message", "request error: …")
+        // so `message` must be read too, or the device shows a bare status.
+        var body = e.responseText || e.message || e.statusText || e.error || '';
 
         if (body && typeof body === 'object') {
             try { body = JSON.stringify(body); } catch (x) { body = ''; }
