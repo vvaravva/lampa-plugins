@@ -35,7 +35,7 @@
     // =====================================================================
 
     var ID  = 'rdb';
-    var VER = '1.3.0';
+    var VER = '1.4.0';
     var LOG = '[real-debrid]';
     var API = 'https://api.real-debrid.com/rest/1.0';
 
@@ -55,12 +55,50 @@
         return (Lampa.Storage.get(ID + '_token', '') + '').trim();
     }
 
+    // Turn whatever the transport handed back into something readable. The
+    // native Android bridge and jQuery report failures differently, and a
+    // generic "request failed" hides the one line that names the cause —
+    // RD answers with a JSON body such as {"error":"bad_token"}.
+    function describe(e) {
+        if (!e) return 'відповіді немає';
+        if (typeof e === 'string') return e.slice(0, 300);
+
+        var parts = [];
+
+        if (e.status) parts.push('HTTP ' + e.status);
+
+        var body = e.responseText || e.statusText || e.error || '';
+
+        if (body && typeof body === 'object') {
+            try { body = JSON.stringify(body); } catch (x) { body = ''; }
+        }
+
+        if (body) parts.push((body + '').slice(0, 300));
+
+        if (!parts.length) {
+            try { parts.push(JSON.stringify(e).slice(0, 300)); }
+            catch (x) { parts.push('невідома помилка'); }
+        }
+
+        return parts.join(' · ');
+    }
+
     // One call to the RD API. post_data as a string turns it into a POST;
     // `false` keeps it a GET — that is the convention Lampa itself uses.
+    //
+    // The token goes in BOTH the Authorization header and the auth_token
+    // query parameter. RD accepts either, and sending both removes any
+    // dependency on custom headers surviving the trip through the native
+    // Android bridge.
     function rdCall(network, path, post_data, ok, err) {
-        network.native(API + path, ok, function (e) {
+        var url = API + path;
+
+        url += (url.indexOf('?') === -1 ? '?' : '&')
+            + 'auth_token=' + encodeURIComponent(token());
+
+        network.native(url, ok, function (e) {
             console.error(LOG, 'request failed:', path, e);
-            err(e);
+            err(describe(e));
         }, post_data, {
             headers: { Authorization: 'Bearer ' + token() },
             dataType: 'json',
@@ -166,6 +204,8 @@
             + 'max-width:30em;background:rgba(255,255,255,.15);overflow:hidden}'
             + '.rdb-status__bar > div{height:100%;width:0;background:#38a564;'
             + 'transition:width .3s}'
+            + '.rdb-status__detail{margin-top:1.2em;opacity:.75;font-size:.9em;'
+            + 'color:#ffb599}'
             + '</style>');
 
         $('body').append(Lampa.Template.get(ID + '_style', {}, true));
@@ -386,6 +426,7 @@
                 + '<div class="rdb-status__stage">Додаємо в Real-Debrid…</div>'
                 + '<div class="rdb-status__descr">Назад — скасувати</div>'
                 + '<div class="rdb-status__bar"><div></div></div>'
+                + '<div class="rdb-status__detail rdb-status__descr--pre"></div>'
                 + '</div>');
 
             html.find('.rdb-status__title').text(title);
@@ -398,6 +439,11 @@
                 if (typeof percent === 'number') {
                     html.find('.rdb-status__bar > div').css('width', percent + '%');
                 }
+            };
+
+            // Where the server's own words go, instead of being swallowed.
+            this.detail = function (text) {
+                html.find('.rdb-status__detail').text(text || '');
             };
 
             Lampa.Controller.collectionSet(scroll.render());
@@ -420,9 +466,9 @@
                     _this.stage('Читаємо список файлів…');
                     _this.waitFiles(0);
                 },
-                function () {
-                    _this.fail('Не вдалося звернутись до Real-Debrid. '
-                        + 'Перевір токен і мережу');
+                function (e) {
+                    _this.fail('Не вдалося звернутись до Real-Debrid',
+                        'addMagnet → ' + e);
                 });
         };
 
@@ -453,8 +499,8 @@
 
                 _this.stage('Розбираємо magnet…');
                 timer = setTimeout(function () { _this.waitFiles(tick + 1); }, POLL_MS);
-            }, function () {
-                _this.fail('Real-Debrid не відповідає');
+            }, function (e) {
+                _this.fail('Real-Debrid не відповідає', 'info → ' + e);
             });
         };
 
@@ -465,8 +511,8 @@
 
                     _this.stage('Чекаємо на Real-Debrid…', 0);
                     _this.waitReady(0);
-                }, function () {
-                    _this.fail('Не вдалося вибрати файл');
+                }, function (e) {
+                    _this.fail('Не вдалося вибрати файл', 'selectFiles → ' + e);
                 });
         };
 
@@ -504,8 +550,8 @@
                 }
 
                 timer = setTimeout(function () { _this.waitReady(tick + 1); }, POLL_MS);
-            }, function () {
-                _this.fail('Real-Debrid не відповідає');
+            }, function (e) {
+                _this.fail('Real-Debrid не відповідає', 'info → ' + e);
             });
         };
 
@@ -519,8 +565,9 @@
                     }
 
                     _this.play(json.download, json.filename || object.title);
-                }, function () {
-                    _this.fail('Не вдалося отримати пряме посилання');
+                }, function (e) {
+                    _this.fail('Не вдалося отримати пряме посилання',
+                        'unrestrict → ' + e);
                 });
         };
 
@@ -539,12 +586,13 @@
             _this.stage('Запускаємо…', 100);
         };
 
-        this.fail = function (text) {
-            console.warn(LOG, text);
+        this.fail = function (text, detail) {
+            console.warn(LOG, text, detail || '');
 
-            Lampa.Noty.show(text, { time: 6000 });
+            Lampa.Noty.show(text, { time: 8000 });
 
-            if (this.stage) this.stage('Не вдалося');
+            if (this.stage)  this.stage('Не вдалося');
+            if (this.detail) this.detail(detail || '');
         };
 
         this.cancel = function () {
